@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Calendar</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans",Arial;}
+    body{max-width:900px;margin:24px auto;padding:16px;}
+    .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;}
+    .nav button{padding:8px 12px;border-radius:6px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer;}
+    .month-title{font-size:1.25rem;font-weight:600;margin:8px 0;}
+    .calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+    .weekday{font-weight:700;text-align:center;padding:8px 4px;background:#eee;border-radius:6px;}
+    .day{min-height:80px;background:#fff;border:1px solid #e3e3e3;border-radius:8px;padding:6px;position:relative;cursor:pointer;}
+    .day.out{opacity:0.35}
+    .day .date-num{position:absolute;top:6px;right:8px;font-weight:600}
+    .events{margin-top:24px;display:flex;flex-direction:column;gap:4px}
+    .event{font-size:0.75rem;padding:3px 6px;border-left:4px solid #4a90e2;background:#f1f8ff;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .event-row{display:flex;align-items:center;gap:6px;padding:6px 8px;border-left:4px solid #4a90e2;background:#f1f8ff;border-radius:4px;margin-bottom:4px;cursor:pointer;user-select:none;}
+    .event-row.selected{background:#fdecea;outline:2px solid #c0392b;}
+    .event-row .event-text{flex:1;font-size:0.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .event-row .event-owner{font-size:0.78rem;color:#555;white-space:nowrap;padding:1px 6px;background:#e8e8e8;border-radius:10px;}
+    .event-row .del-btn{flex-shrink:0;background:none;border:none;cursor:pointer;color:#c0392b;font-size:1rem;padding:0 4px;line-height:1;border-radius:4px;}
+    .event-row .del-btn:hover{background:#fdecea;}
+    .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .add-form{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+    .add-form input[type="text"]{flex:1;min-width:100px;padding:8px;border-radius:6px;border:1px solid #ccc}
+    input[type="color"]{width:40px;height:36px;border:none;padding:0;cursor:pointer;border-radius:6px;}
+    input[type="time"],input[type="date"]{padding:4px 6px;border-radius:6px;border:1px solid #ccc}
+    .add-form button{padding:8px 14px;border-radius:6px;border:1px solid #ccc;background:#4a90e2;color:#fff;cursor:pointer;font-weight:600;}
+    .add-form button:hover{background:#2e6db4;}
+    .del-selected-btn{padding:6px 14px;border-radius:6px;border:1px solid #c0392b;background:#fdecea;color:#c0392b;cursor:pointer;font-size:0.85rem;font-weight:600;}
+    .del-selected-btn:hover{background:#c0392b;color:#fff;}
+    .toolbar{display:flex;align-items:center;gap:8px;margin-top:8px;min-height:32px;}
+    #syncStatus{font-size:0.78rem;padding:3px 10px;border-radius:10px;background:#eaf5ea;color:#2e7d32;border:1px solid #a5d6a7;}
+    #syncStatus.error{background:#fdecea;color:#c0392b;border-color:#ef9a9a;}
+    #syncStatus.loading{background:#fff8e1;color:#f57f17;border-color:#ffe082;}
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="nav">
+      <button id="prev">&lt; <span id="txtPrev"></span></button>
+      <button id="today"></button>
+      <button id="next"><span id="txtNext"></span> &gt;</button>
+    </div>
+    <div class="month-title" id="monthTitle"></div>
+    <div class="controls">
+      <span id="syncStatus" class="loading">กำลังเชื่อมต่อ...</span>
+      <label>Language:
+        <select id="langSelect">
+          <option value="th">ไทย</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <select id="monthSelect"></select>
+      <select id="yearSelect"></select>
+    </div>
+  </div>
+
+  <div class="calendar" id="calendar"></div>
+  <div id="selectedInfo" style="margin-top:16px"></div>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+    // =====  Firebase config  =====
+   const firebaseConfig = {
+  	apiKey: "AIzaSyAMIeeF3uVaQeJMoMQqI5IFYR0omlga_i0",
+  	authDomain: "cldte-3bf7f.firebaseapp.com",
+  	databaseURL: "https://cldte-3bf7f-default-rtdb.asia-	southeast1.firebasedatabase.app",
+ 	projectId: "cldte-3bf7f",
+  	storageBucket: "cldte-3bf7f.firebasestorage.app",
+  	messagingSenderId: "75645302958",
+ 	appId: "1:75645302958:web:954687af501412310d553f",
+  	measurementId: "G-E8PWCZ46Z5"
+    };
+    // =============================================
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const eventsRef = ref(db, 'events');
+
+    let lang = "th";
+    let events = {};
+
+    const TEXT = {
+      th: {
+        weekdays: ['อา','จ','อ','พ','พฤ','ศ','ส'],
+        today: "วันนี้", prev: "ก่อนหน้า", next: "ถัดไป",
+        noEvent: "ยังไม่มีรายการ", addBtn: "เพิ่ม",
+        months: ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"],
+        confirmDel: "ลบ event นี้?",
+        confirmDelMany: (n) => `ลบ ${n} event ที่เลือก?`,
+        delSelected: (n) => `ลบที่เลือก (${n})`,
+        placeholderEvent: "ชื่อ event...",
+        placeholderOwner: "ชื่อเจ้าของ...",
+        connected: "เชื่อมต่อแล้ว",
+        connecting: "กำลังเชื่อมต่อ...",
+        errorConn: "ไม่สามารถเชื่อมต่อได้"
+      },
+      en: {
+        weekdays: ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],
+        today: "Today", prev: "Prev", next: "Next",
+        noEvent: "No events", addBtn: "Add",
+        months: ["January","February","March","April","May","June","July","August","September","October","November","December"],
+        confirmDel: "Delete this event?",
+        confirmDelMany: (n) => `Delete ${n} selected event(s)?`,
+        delSelected: (n) => `Delete selected (${n})`,
+        placeholderEvent: "Event name...",
+        placeholderOwner: "Owner name...",
+        connected: "Connected",
+        connecting: "Connecting...",
+        errorConn: "Connection failed"
+      }
+    };
+
+    let viewDate = new Date();
+    let currentSelectedDate = null;
+    const calendarEl = document.getElementById('calendar');
+    const monthTitle = document.getElementById('monthTitle');
+    const selectedInfo = document.getElementById('selectedInfo');
+    const langSelect = document.getElementById('langSelect');
+    const syncStatus = document.getElementById('syncStatus');
+
+    function formatKey(date) { return date.toISOString().slice(0,10); }
+
+    function saveEvents() {
+      set(eventsRef, events);
+    }
+
+    // Real-time listener — sync ทุก user พร้อมกัน
+    onValue(eventsRef, (snapshot) => {
+      events = snapshot.val() || {};
+      syncStatus.textContent = TEXT[lang].connected;
+      syncStatus.className = '';
+      render();
+      if(currentSelectedDate) showSelected(currentSelectedDate);
+    }, (error) => {
+      syncStatus.textContent = TEXT[lang].errorConn;
+      syncStatus.className = 'error';
+    });
+
+    function render() {
+      document.getElementById("today").textContent = TEXT[lang].today;
+      document.getElementById("txtPrev").textContent = TEXT[lang].prev;
+      document.getElementById("txtNext").textContent = TEXT[lang].next;
+      calendarEl.innerHTML = '';
+
+      for(let i=0;i<7;i++){
+        const w = document.createElement('div');
+        w.className='weekday';
+        w.textContent = TEXT[lang].weekdays[i];
+        calendarEl.appendChild(w);
+      }
+
+      const year = viewDate.getFullYear();
+      const month = viewDate.getMonth();
+      monthTitle.textContent = TEXT[lang].months[month] + " " + year;
+
+      const startDay = new Date(year, month, 1).getDay();
+      const daysInMonth = new Date(year, month+1, 0).getDate();
+      const totalCells = Math.ceil((startDay + daysInMonth) / 7) * 7;
+      const startDate = new Date(year, month, 1 - startDay);
+
+      for(let c=0;c<totalCells;c++){
+        const d = new Date(startDate);
+        d.setDate(startDate.getDate() + c);
+        const cell = document.createElement('div');
+        cell.className = 'day';
+        if(d.getMonth() !== month) cell.classList.add('out');
+
+        const num = document.createElement('div');
+        num.className='date-num';
+        num.textContent = d.getDate();
+        cell.appendChild(num);
+
+        const key = formatKey(d);
+        if(events[key]){
+          const evs = document.createElement('div');
+          evs.className='events';
+          events[key].slice(0,3).forEach(e=>{
+            const ev = document.createElement('div');
+            ev.className='event';
+            ev.style.borderLeftColor = e.color || '#4a90e2';
+            const timeStr = e.startTime ? e.startTime + (e.endTime? ' - '+e.endTime : '') : '';
+            const ownerStr = e.owner ? ` [${e.owner}]` : '';
+            ev.textContent = (timeStr ? timeStr + ' ' : '') + e.text + ownerStr;
+            evs.appendChild(ev);
+          });
+          cell.appendChild(evs);
+        }
+
+        cell.addEventListener('click', ()=> showSelected(d));
+        calendarEl.appendChild(cell);
+      }
+
+      monthSelect.value = viewDate.getMonth();
+      yearSelect.value = viewDate.getFullYear();
+    }
+
+    function showSelected(date) {
+      currentSelectedDate = date;
+      const key = formatKey(date);
+      let selected = new Set();
+
+      const dateLabel = date.toLocaleDateString(lang==="th"?"th-TH":"en-US", {
+        weekday:'long', year:'numeric', month:'long', day:'numeric'
+      });
+
+      selectedInfo.innerHTML = '';
+      const header = document.createElement('strong');
+      header.textContent = dateLabel;
+      selectedInfo.appendChild(header);
+
+      const body = document.createElement('div');
+      body.style.marginTop = '8px';
+
+      const listEl = document.createElement('div');
+      listEl.id = 'listEvents';
+
+      const toolbar = document.createElement('div');
+      toolbar.className = 'toolbar';
+
+      const delSelBtn = document.createElement('button');
+      delSelBtn.className = 'del-selected-btn';
+      delSelBtn.style.display = 'none';
+      toolbar.appendChild(delSelBtn);
+
+      function updateToolbar() {
+        if(selected.size > 0){
+          delSelBtn.style.display = '';
+          delSelBtn.textContent = TEXT[lang].delSelected(selected.size);
+        } else {
+          delSelBtn.style.display = 'none';
+        }
+      }
+
+      function renderList() {
+        listEl.innerHTML = '';
+        selected.clear();
+        updateToolbar();
+        const cur = events[key] || [];
+
+        if(cur.length === 0){
+          listEl.innerHTML = `<em>${TEXT[lang].noEvent}</em>`;
+          return;
+        }
+
+        cur.forEach((e, idx) => {
+          const timeStr = e.startTime ? e.startTime + (e.endTime? ' - '+e.endTime : '') : '';
+          const row = document.createElement('div');
+          row.className = 'event-row';
+          row.style.borderLeftColor = e.color || '#4a90e2';
+
+          const txt = document.createElement('span');
+          txt.className = 'event-text';
+          txt.textContent = (timeStr ? timeStr + ' ' : '') + e.text;
+          row.appendChild(txt);
+
+          if(e.owner){
+            const ownerBadge = document.createElement('span');
+            ownerBadge.className = 'event-owner';
+            ownerBadge.textContent = e.owner;
+            row.appendChild(ownerBadge);
+          }
+
+          const delBtn = document.createElement('button');
+          delBtn.className = 'del-btn';
+          delBtn.title = TEXT[lang].confirmDel;
+          delBtn.innerHTML = '&#10005;';
+          delBtn.onclick = (ev) => {
+            ev.stopPropagation();
+            if(confirm(TEXT[lang].confirmDel)){
+              events[key].splice(idx, 1);
+              if(events[key].length === 0) delete events[key];
+              saveEvents();
+            }
+          };
+
+          row.addEventListener('click', (ev) => {
+            if(ev.ctrlKey || ev.metaKey){
+              if(selected.has(idx)){ selected.delete(idx); row.classList.remove('selected'); }
+              else { selected.add(idx); row.classList.add('selected'); }
+              updateToolbar();
+            }
+          });
+
+          row.appendChild(delBtn);
+          listEl.appendChild(row);
+        });
+      }
+
+      delSelBtn.onclick = () => {
+        if(!selected.size) return;
+        if(confirm(TEXT[lang].confirmDelMany(selected.size))){
+          const indices = Array.from(selected).sort((a,b) => b - a);
+          indices.forEach(i => events[key].splice(i, 1));
+          if(events[key].length === 0) delete events[key];
+          saveEvents();
+        }
+      };
+
+      renderList();
+      body.appendChild(listEl);
+      body.appendChild(toolbar);
+
+      const addForm = document.createElement('div');
+      addForm.className = 'add-form';
+      addForm.innerHTML = `
+        <input id="evtText" type="text" placeholder="${TEXT[lang].placeholderEvent}" />
+        <input id="evtOwner" type="text" placeholder="${TEXT[lang].placeholderOwner}" style="flex:0.6;min-width:80px;" />
+        <input id="evtColor" type="color" value="#4a90e2" />
+        <input id="evtStart" type="time" />
+        <input id="evtEnd" type="time" />
+        <input id="evtDateStart" type="date" />
+        <input id="evtDateEnd" type="date" />
+        <button id="addBtn">${TEXT[lang].addBtn}</button>
+      `;
+      body.appendChild(addForm);
+      selectedInfo.appendChild(body);
+
+      document.getElementById('addBtn').onclick = () => {
+        const txt = document.getElementById('evtText').value.trim();
+        const owner = document.getElementById('evtOwner').value.trim();
+        const color = document.getElementById('evtColor').value;
+        const startTime = document.getElementById('evtStart').value;
+        const endTime = document.getElementById('evtEnd').value;
+        const dateStart = document.getElementById('evtDateStart').value;
+        const dateEnd   = document.getElementById('evtDateEnd').value;
+
+        if(!txt) return alert("Please type event name");
+        if(!dateStart) return alert("Choose start date");
+        if(!dateEnd) return alert("Choose end date");
+
+        let d1 = new Date(dateStart);
+        let d2 = new Date(dateEnd);
+        if(d2 < d1) return alert("End date must be after start date");
+
+        while(d1 <= d2){
+          const k = formatKey(d1);
+          events[k] = events[k] || [];
+          events[k].push({ text: txt, owner, color, startTime, endTime, multiStart: dateStart, multiEnd: dateEnd });
+          d1.setDate(d1.getDate() + 1);
+        }
+
+        saveEvents();
+      };
+    }
+
+    document.getElementById('prev').onclick = ()=>{ viewDate.setMonth(viewDate.getMonth()-1); render(); };
+    document.getElementById('next').onclick = ()=>{ viewDate.setMonth(viewDate.getMonth()+1); render(); };
+    document.getElementById('today').onclick = ()=>{ viewDate = new Date(); render(); };
+    langSelect.onchange = () => { lang = langSelect.value; initMonthYearPicker(); render(); };
+
+    const monthSelect = document.getElementById('monthSelect');
+    const yearSelect  = document.getElementById('yearSelect');
+
+    function initMonthYearPicker() {
+      monthSelect.innerHTML = "";
+      TEXT[lang].months.forEach((m,i)=>{
+        const op = document.createElement('option');
+        op.value = i; op.textContent = m;
+        monthSelect.appendChild(op);
+      });
+      yearSelect.innerHTML = "";
+      const yearNow = new Date().getFullYear();
+      for(let y = yearNow-50; y <= yearNow+30; y++){
+        const op = document.createElement('option');
+        op.value = y; op.textContent = y;
+        yearSelect.appendChild(op);
+      }
+      monthSelect.value = viewDate.getMonth();
+      yearSelect.value = viewDate.getFullYear();
+    }
+
+    monthSelect.onchange = ()=>{ viewDate.setMonth(parseInt(monthSelect.value)); render(); };
+    yearSelect.onchange  = ()=>{ viewDate.setFullYear(parseInt(yearSelect.value)); render(); };
+
+    initMonthYearPicker();
+  </script>
+</body>
+</html>
